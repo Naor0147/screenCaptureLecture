@@ -10,9 +10,10 @@ from datetime import datetime
 # --- GLOBAL CONFIGURATION (Default Settings) ---
 CONFIG = {
     "CAPTURE_INTERVAL_SEC": 60,      # Check every 60 seconds
-    "SECTION_INTERVAL_MIN": 30,      # Create new folder every 30 mins
+    "SECTION_INTERVAL_MIN": 120,      # Create new folder every 120 mins
     "PNG_COMPRESSION": 2,            # 0 (Fastest/Big) to 9 (Slowest/Small)
-    "CHANGE_THRESHOLD": 2.0          # Sensitivity for duplicate detection
+    "CHANGE_THRESHOLD": 2.0,         # Sensitivity for duplicate detection
+    "SCREEN_INDEX": 2                # Monitor index for live capture (1-based)
 }
 # -----------------------------------------------
 
@@ -75,6 +76,21 @@ def get_subfolder_name(minutes_elapsed):
     end_min = (folder_index + 1) * interval
     return f"Section_{folder_index + 1:02d}__Mins_{start_min}_to_{end_min}"
 
+def list_monitors_info():
+    """Returns list of available monitors (excluding the virtual 'all monitors')."""
+    with mss.mss() as sct:
+        return sct.monitors[1:]
+
+def get_valid_screen_index(screen_index, monitor_count):
+    """Clamps selected screen index to an existing monitor index."""
+    if monitor_count <= 0:
+        return 1
+    if screen_index < 1:
+        return 1
+    if screen_index > monitor_count:
+        return monitor_count
+    return screen_index
+
 def save_frame_based_on_mode(save_mode, gray_frame, base_section_path, timestamp):
     """
     Saves image(s) based on mode.
@@ -130,7 +146,8 @@ def run_settings_menu():
         print(f" [1] Capture Interval:   {CONFIG['CAPTURE_INTERVAL_SEC']} sec")
         print(f" [2] Section Duration:   {CONFIG['SECTION_INTERVAL_MIN']} min")
         print(f" [3] PNG Compression:    {CONFIG['PNG_COMPRESSION']} (0-9)")
-        print(" [4] Back to Main Menu")
+        print(f" [4] Screen Index:       {CONFIG['SCREEN_INDEX']}")
+        print(" [5] Back to Main Menu")
         print("========================================")
         
         choice = input("Select setting to change: ").strip()
@@ -152,8 +169,29 @@ def run_settings_menu():
                 val = int(input("Enter compression (0=Fast/Big, 9=Slow/Small): "))
                 if 0 <= val <= 9: CONFIG['PNG_COMPRESSION'] = val
             except ValueError: print("Invalid number (must be 0-9).")
+
+        elif choice == '4':
+            try:
+                monitors = list_monitors_info()
+                if not monitors:
+                    print("No monitors detected.")
+                    continue
+
+                print("\nAvailable screens:")
+                for idx, mon in enumerate(monitors, start=1):
+                    print(f" [{idx}] {mon['width']}x{mon['height']} at ({mon['left']}, {mon['top']})")
+
+                val = int(input("Choose screen index: "))
+                if 1 <= val <= len(monitors):
+                    CONFIG['SCREEN_INDEX'] = val
+                else:
+                    print(f"Invalid screen index. Enter 1 to {len(monitors)}.")
+            except ValueError:
+                print("Invalid number.")
+            except Exception as e:
+                print(f"Could not read monitors: {e}")
             
-        elif choice == '4' or choice == '':
+        elif choice == '5' or choice == '':
             break
 
 # ===========================
@@ -173,8 +211,13 @@ def run_live_capture(save_mode):
     last_saved_frame = None
 
     with mss.mss() as sct:
-        monitor = sct.monitors[2] if len(sct.monitors) > 2 else sct.monitors[1]
-        print(f"Targeting Monitor: {monitor}")
+        monitor_count = len(sct.monitors) - 1
+        selected_index = get_valid_screen_index(CONFIG['SCREEN_INDEX'], monitor_count)
+        if selected_index != CONFIG['SCREEN_INDEX']:
+            print(f"Requested screen {CONFIG['SCREEN_INDEX']} is unavailable. Using screen {selected_index} instead.")
+
+        monitor = sct.monitors[selected_index]
+        print(f"Targeting Screen #{selected_index}: {monitor['width']}x{monitor['height']} at ({monitor['left']}, {monitor['top']})")
 
         try:
             while True:
@@ -275,10 +318,12 @@ def main():
         print("========================================")
         print(" [1] Live Screen Capture")
         print(" [2] Process a Video File")
-        print(" [s] Settings (Interval, Size, Quality)")
+        print(" [s] Settings (Interval, Size, Quality, Screen)")
         print("========================================")
         
         choice = input("Select option: ").strip().lower()
+        
+        
 
         if choice == 's':
             run_settings_menu()
